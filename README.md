@@ -9,7 +9,7 @@ To run this project in minutes, check  [Dependency](#0-Dependency) and [Quick St
 
 Please cite the following paper if you use this project in your research: 
 
-> H. Gao, Q. Qiu, W Hua, X. Zhang, Z Han, and S. Zhang, "VR-LSE: A novel and compact vectorization representation approach of local static environments for unmanned ground vehicles". *arXiv* preprint, submitted.
+> H. Gao, Q. Qiu, W Hua, X. Zhang, Z Han, and S. Zhang, "CVR-LSE: Compact Vectorization Representation of Local Static Environments for Unmanned Ground Vehicles". *arXiv* preprint, submitted.
 
 ## Table of Contents
 
