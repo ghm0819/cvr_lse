@@ -1,0 +1,14 @@
+ground_segmentation:
+  n_threads: 4            # number of threads to use.
+  r_min: 1.0              # minimum point distance.
+  r_max: 80               # maximum point distance.
+  n_bins: 200             # number of radial bins.
+  n_segments: 360         # number of radial segments.
+  max_dist_to_line: 0.3   # maximum vertical distance of point to line to be considered ground.
+  sensor_height: 1.8      # sensor height above ground.
+  max_slope: 0.3          # maximum slope of a ground line.
+  max_fit_error: 0.15      # maximum error of a point during line fit.
+  long_threshold: 5.0     # distance between points after which they are considered far from each other.
+  max_long_height: 0.3    # maximum height change to previous point in long line.
+  max_start_height: 0.3   # maximum difference to estimated ground height to start a new line.
+  line_search_angle: 0.3  # how far to search in angular direction to find a line [rad].

@@ -1,0 +1,20 @@
+cvr_lse:
+  #grid map configuration
+  offset_x: 0.0
+  offset_y: 10.0
+  map_width: 80.0
+  map_height: 80.0
+  map_output_width: 60.0
+  map_output_height: 60.0
+  map_resolution: 0.2
+  occupancy_factor: 0.7
+  free_factor: 0.4
+  occupancy_threshold: 0.95
+  free_threshold: 0.3
+  max_odd_threshold: 20.0
+  min_odd_threshold: -10.0
+  horizontal_resolution: 0.2 # degree
+  max_distance: 100.0 # max distance for the lidar sensor
+  # calibration information from vehicle to lidar
+  extrinsic_trans: [0.0153689, 0.467894, 1.52664]
+  extrinsic_rot: [0.701524, -0.00272514, -0.00153039, 0.71263]
