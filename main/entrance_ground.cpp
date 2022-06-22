@@ -17,6 +17,7 @@ bool EntranceGround::Start() {
 	nh_.param<std::string>("/ground_segmentation/cloud_label_topic", cloud_label_topic,
 		"/ground_segmentation/cloud_label");
 	ground_label_ =  nh_.advertise<cvr_lse::cloud_label>(cloud_label_topic, 1);
+	return true;
 }
 
 bool EntranceGround::LoadParameterForGroundSegmentation() {
@@ -70,7 +71,7 @@ int main(int argc, char** argv) {
 	ros::NodeHandle nh("~");
 	ros::Subscriber point_cloud_sub_;
 	cvr_lse::EntranceGround enter_node(nh);
-	enter_node.Start();
+	static_cast<void>(enter_node.Start());
 	std::string lidar_topic;
 	nh.param<std::string>("/ground_segmentation/lidar_topic", lidar_topic, "/hesai40p_points_xyzirt");
 	point_cloud_sub_ = nh.subscribe(lidar_topic, 1, &cvr_lse::EntranceGround::PointCloudCallback,

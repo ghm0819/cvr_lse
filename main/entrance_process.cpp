@@ -24,6 +24,7 @@ bool EntranceProcess::Start() {
 #endif
 	start_flag_ = true;
 	main_processer_ = std::thread(&EntranceProcess::MainProcess, this);
+	return true;
 }
 
 void EntranceProcess::Stop() {
@@ -166,7 +167,7 @@ int main(int argc, char** argv) {
 	ros::Subscriber point_label_sub_;
 	ros::Subscriber lidar_odometry_sub_;
 	cvr_lse::EntranceProcess enter_node(nh);
-	enter_node.Start();
+	static_cast<void>(enter_node.Start());
 	std::string lidar_topic;
 	std::string cloud_label_topic;
 	std::string lidar_odom_topic;
