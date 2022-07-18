@@ -16,53 +16,48 @@ void CvrLseProcess::InitCvrLse() {
 	update_flag_.resize(map_->getSize()(0U), map_->getSize()(1U));
 }
 
-void CvrLseProcess::Process(const CloudInfo& cloud_info, const PoseInfo& pose_info) {
+/*
+ * parameter: cloud_info, contains the point and label info
+ * parameter: pose_info, the main lidar pose
+ */
+void CvrLseProcess::Process(const multi_cloud_label& cloud_info, const PoseInfo& pose_info) {
 	// the received pose is lidar pose
-	ScanAll scan_obstacle_info;
-	ScanAll scan_ground_info;
-	scan_obstacle_info.resize(static_cast<size_t>(360.0 / param_.horizontal_resolution));
-	scan_ground_info.resize(static_cast<size_t>(360.0 / param_.horizontal_resolution));
+	std::vector<ScanAll> scan_obstacle_info;
+	std::vector<ScanAll> scan_ground_info;
 	PreProcessPointCloud(cloud_info, scan_obstacle_info, scan_ground_info);
-	//
-	pcl::PointCloud<PointXYZIRT> obstacle_cloud;
-	obstacle_cloud.header = cloud_info.first.header;
-	obstacle_cloud.header.frame_id = "lidar_link";
-	for (const auto& obstacle : scan_obstacle_info) {
-		if (!obstacle.empty()) {
-			PointXYZIRT point{};
-			point.x = static_cast<float>(obstacle.front().x());
-			point.y = static_cast<float>(obstacle.front().y());
-			point.z = static_cast<float>(obstacle.front().z());
-			obstacle_cloud.push_back(point);
-		}
-	}
-	obstacle_pub_.publish(obstacle_cloud);
-	//
+
 	if (initial_flag_) {
-		cur_lidar_pos_ = pose_info;
-		cur_veh_pos_ = TranformFromLidarToVehicle(pose_info);
+		cur_lidar_pos_[ground_segmentation::Main] = pose_info;
+		cur_veh_pos_ = TranformFromLidarToVehicle(pose_info, ground_segmentation::Main);
+        TransformFromVehicleToAuxiliaryLidars(cur_veh_pos_);
 		map_position_ = ObtainCurrentMapPosition(cur_veh_pos_);
 		InitCvrLse();
 		update_flag_.setConstant(0U);
-		UpdateGridMap(scan_obstacle_info);
+		for (auto lidar_id = ground_segmentation::Main; lidar_id < ground_segmentation::LidarSize;
+		    lidar_id = static_cast<ground_segmentation::LidarID>(lidar_id + 1)) {
+            UpdateGridMap(lidar_id, scan_obstacle_info, scan_ground_info);
+		}
 		initial_flag_ = false;
 		return;
 	}
 	last_lidar_pos_ = cur_lidar_pos_;
 	last_veh_pos_ = cur_veh_pos_;
 
-	cur_lidar_pos_ = pose_info;
-	cur_veh_pos_ = TranformFromLidarToVehicle(pose_info);
+	cur_lidar_pos_[ground_segmentation::Main] = pose_info;
+	cur_veh_pos_ = TranformFromLidarToVehicle(pose_info, ground_segmentation::Main);
+	TransformFromVehicleToAuxiliaryLidars(cur_veh_pos_);
 	map_position_ = ObtainCurrentMapPosition(cur_veh_pos_);
 	map_->move(map_position_);
 	update_flag_.setConstant(0U);
-	UpdateGridMap(scan_obstacle_info);
+    for (auto lidar_id = ground_segmentation::Main; lidar_id < ground_segmentation::LidarSize;
+         lidar_id = static_cast<ground_segmentation::LidarID>(lidar_id + 1)) {
+        UpdateGridMap(lidar_id, scan_obstacle_info, scan_ground_info);
+    }
 	PublishGridMap(*map_);
-
 	// process the submap from the complete map information
 	bool isSuccess = false;
 	auto submap = map_->getSubmap(map_position_, grid_map::Length(param_.map_output_width, param_.map_output_height),
-	                              isSuccess);
+        isSuccess);
 	std::vector<std::vector<cv::Point2f>> find_contour;
 	post_process_->ProcessGridMap(submap, find_contour);
 	TransformFromOdomToVeh(cur_veh_pos_, find_contour);
@@ -70,16 +65,63 @@ void CvrLseProcess::Process(const CloudInfo& cloud_info, const PoseInfo& pose_in
 }
 
 void CvrLseProcess::InitialTransformationInfo() {
-	ext_trans_veh_lidar_ = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(param_.extTran.data(), 3, 1);
-	ext_rot_veh_lidar_ = Eigen::Quaterniond(param_.extRot[0U], param_.extRot[1U], param_.extRot[2U], param_.extRot[3U]);
-	ext_rot_lidar_veh_ = ext_rot_veh_lidar_.inverse();
-	ext_trans_lidar_veh_ = -ext_rot_lidar_veh_.matrix() * ext_trans_veh_lidar_;
+    ext_transform_matrix_lidar_veh_.resize(ground_segmentation::LidarSize);
+    ext_transform_matrix_veh_lidar_.resize(ground_segmentation::LidarSize);
+    for (auto lidar_id = ground_segmentation::Main; lidar_id < ground_segmentation::LidarSize;
+        lidar_id = static_cast<ground_segmentation::LidarID>(lidar_id + 1)) {
+        ext_transform_matrix_lidar_veh_[lidar_id] = Eigen::Isometry3d::Identity();
+        ext_transform_matrix_veh_lidar_[lidar_id] = Eigen::Isometry3d::Identity();
+    }
+    // transform from Main to Vehicle
+    Eigen::Vector3d tran_temp;
+    Eigen::Quaterniond rot_temp;
+    tran_temp = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(param_.extrinsic_trans.data(), 3, 1);
+    rot_temp = Eigen::Quaterniond(param_.extrinsic_rot[0U], param_.extrinsic_rot[1U],
+                                  param_.extrinsic_rot[2U], param_.extrinsic_rot[3U]);
+	ext_transform_matrix_veh_lidar_[ground_segmentation::Main].rotate(rot_temp);
+	ext_transform_matrix_veh_lidar_[ground_segmentation::Main].pretranslate(tran_temp);
 
-	ext_transform_matrix_veh_lidar_.rotate(ext_rot_veh_lidar_);
-	ext_transform_matrix_veh_lidar_.pretranslate(ext_trans_veh_lidar_);
+	ext_transform_matrix_lidar_veh_[ground_segmentation::Main] =
+        ext_transform_matrix_veh_lidar_[ground_segmentation::Main].inverse();
 
-	ext_transform_matrix_lidar_veh_.rotate(ext_rot_lidar_veh_);
-	ext_transform_matrix_lidar_veh_.pretranslate(ext_trans_lidar_veh_);
+	// transform from Left to Vehicle
+    tran_temp = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(
+        param_.extrinsic_trans_left.data(), 3, 1);
+    rot_temp = Eigen::Quaterniond(param_.extrinsic_rot_left[0U], param_.extrinsic_rot_left[1U],
+                                  param_.extrinsic_rot_left[2U], param_.extrinsic_rot_left[3U]);
+    ext_transform_matrix_veh_lidar_[ground_segmentation::Left].rotate(rot_temp);
+    ext_transform_matrix_veh_lidar_[ground_segmentation::Left].pretranslate(tran_temp);
+    ext_transform_matrix_veh_lidar_[ground_segmentation::Left] =
+        ext_transform_matrix_veh_lidar_[ground_segmentation::Main] *
+        ext_transform_matrix_veh_lidar_[ground_segmentation::Left];
+    ext_transform_matrix_lidar_veh_[ground_segmentation::Left] =
+        ext_transform_matrix_veh_lidar_[ground_segmentation::Left].inverse();
+
+    // transform from right to Vehicle
+    tran_temp = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(
+        param_.extrinsic_trans_right.data(), 3, 1);
+    rot_temp = Eigen::Quaterniond(param_.extrinsic_rot_right[0U], param_.extrinsic_rot_right[1U],
+                                  param_.extrinsic_rot_right[2U], param_.extrinsic_rot_right[3U]);
+    ext_transform_matrix_veh_lidar_[ground_segmentation::Right].rotate(rot_temp);
+    ext_transform_matrix_veh_lidar_[ground_segmentation::Right].pretranslate(tran_temp);
+    ext_transform_matrix_veh_lidar_[ground_segmentation::Right] =
+        ext_transform_matrix_veh_lidar_[ground_segmentation::Main] *
+        ext_transform_matrix_veh_lidar_[ground_segmentation::Right];
+    ext_transform_matrix_lidar_veh_[ground_segmentation::Right] =
+        ext_transform_matrix_veh_lidar_[ground_segmentation::Right].inverse();
+
+    // transform from Rear to Vehicle
+    tran_temp = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(
+            param_.extrinsic_trans_rear.data(), 3, 1);
+    rot_temp = Eigen::Quaterniond(param_.extrinsic_rot_rear[0U], param_.extrinsic_rot_rear[1U],
+                                  param_.extrinsic_rot_rear[2U], param_.extrinsic_rot_rear[3U]);
+    ext_transform_matrix_veh_lidar_[ground_segmentation::Rear].rotate(rot_temp);
+    ext_transform_matrix_veh_lidar_[ground_segmentation::Rear].pretranslate(tran_temp);
+    ext_transform_matrix_veh_lidar_[ground_segmentation::Rear] =
+            ext_transform_matrix_veh_lidar_[ground_segmentation::Main] *
+            ext_transform_matrix_veh_lidar_[ground_segmentation::Rear];
+    ext_transform_matrix_lidar_veh_[ground_segmentation::Rear] =
+        ext_transform_matrix_veh_lidar_[ground_segmentation::Rear].inverse();
 }
 
 void CvrLseProcess::TransformFromOdomToVeh(const PoseInfo& cur_pose,
@@ -104,20 +146,45 @@ void CvrLseProcess::InitialThresholdInfo() {
 	free_factor_ = static_cast<float>(std::log(param_.free_factor / (1.0 - param_.free_factor)));
 }
 
-PoseInfo CvrLseProcess::TranformFromLidarToVehicle(const PoseInfo& lidar_pose) {
+PoseInfo CvrLseProcess::TranformFromLidarToVehicle(const PoseInfo& lidar_pose,
+    const ground_segmentation::LidarID& lidar_id) {
 	auto lidar_quat = Eigen::AngleAxisd(lidar_pose.yaw, Eigen::Vector3d::UnitZ()) *
 	                  Eigen::AngleAxisd(lidar_pose.pitch, Eigen::Vector3d::UnitY()) *
 	                  Eigen::AngleAxisd(lidar_pose.roll, Eigen::Vector3d::UnitX());
 	Eigen::Isometry3d lidar_matrix = Eigen::Isometry3d::Identity();
 	lidar_matrix.rotate(lidar_quat);
 	lidar_matrix.pretranslate(Eigen::Vector3d(lidar_pose.x, lidar_pose.y, lidar_pose.z));
-	auto veh_matrix = lidar_matrix * ext_transform_matrix_lidar_veh_;
+	auto veh_matrix = lidar_matrix * ext_transform_matrix_lidar_veh_[lidar_id];
 	double roll = 0.0;
 	double pitch = 0.0;
 	double yaw = 0;
 	QuaternionToEuler(Eigen::Quaterniond(veh_matrix.rotation().matrix()), roll, pitch, yaw);
 	return PoseInfo {veh_matrix.translation().x(), veh_matrix.translation().y(), veh_matrix.translation().z(),
 	                 roll, pitch, yaw, lidar_pose.time};
+}
+
+void CvrLseProcess::TransformFromVehicleToAuxiliaryLidars(const PoseInfo& veh_pose) {
+    for (auto lidar_id = ground_segmentation::Left; lidar_id < ground_segmentation::LidarSize;
+        lidar_id = static_cast<ground_segmentation::LidarID>(lidar_id + 1)) {
+        cur_lidar_pos_[lidar_id] = TranformFromVehicleToLidar(veh_pose, lidar_id);
+    }
+}
+
+PoseInfo CvrLseProcess::TranformFromVehicleToLidar(const PoseInfo &veh_pose,
+    const ground_segmentation::LidarID& lidar_id) {
+    auto veh_quat = Eigen::AngleAxisd(veh_pose.yaw, Eigen::Vector3d::UnitZ()) *
+                    Eigen::AngleAxisd(veh_pose.pitch, Eigen::Vector3d::UnitY()) *
+                    Eigen::AngleAxisd(veh_pose.roll, Eigen::Vector3d::UnitX());
+    Eigen::Isometry3d veh_matrix = Eigen::Isometry3d::Identity();
+    veh_matrix.rotate(veh_quat);
+    veh_matrix.pretranslate(Eigen::Vector3d(veh_pose.x, veh_pose.y, veh_pose.z));
+    auto lidar_matrix = veh_matrix * ext_transform_matrix_veh_lidar_[lidar_id];
+    double roll = 0.0;
+    double pitch = 0.0;
+    double yaw = 0;
+    QuaternionToEuler(Eigen::Quaterniond(lidar_matrix.rotation().matrix()), roll, pitch, yaw);
+    return PoseInfo {lidar_matrix.translation().x(), lidar_matrix.translation().y(), lidar_matrix.translation().z(),
+        roll, pitch, yaw, veh_pose.time};
 }
 
 void CvrLseProcess::QuaternionToEuler(const Eigen::Quaterniond& q_info, double& roll, double& pitch, double& yaw) {
@@ -140,22 +207,6 @@ void CvrLseProcess::QuaternionToEuler(const Eigen::Quaterniond& q_info, double& 
 	}
 }
 
-PoseInfo CvrLseProcess::TranformFromVehicleToLidar(const PoseInfo &vehPose) {
-	auto lidar_quat = Eigen::AngleAxisd(vehPose.yaw, Eigen::Vector3d::UnitZ()) *
-	                  Eigen::AngleAxisd(vehPose.pitch, Eigen::Vector3d::UnitY()) *
-	                  Eigen::AngleAxisd(vehPose.roll, Eigen::Vector3d::UnitX());
-	Eigen::Isometry3d veh_matrix = Eigen::Isometry3d::Identity();
-	veh_matrix.rotate(lidar_quat);
-	veh_matrix.pretranslate(Eigen::Vector3d(vehPose.x, vehPose.y, vehPose.z));
-	auto lidar_matrix = veh_matrix * ext_transform_matrix_lidar_veh_;
-	double roll = 0.0;
-	double pitch = 0.0;
-	double yaw = 0;
-	QuaternionToEuler(Eigen::Quaterniond(lidar_matrix.rotation().matrix()), roll, pitch, yaw);
-	return PoseInfo {lidar_matrix.translation().x(), lidar_matrix.translation().y(), lidar_matrix.translation().z(),
-		roll, pitch, yaw, vehPose.time};
-}
-
 grid_map::Position CvrLseProcess::ObtainCurrentMapPosition(const PoseInfo &vehPose) const {
 	auto vehQuat = Eigen::AngleAxisd(vehPose.yaw, Eigen::Vector3d::UnitZ()) *
 		Eigen::AngleAxisd(vehPose.pitch, Eigen::Vector3d::UnitY()) *
@@ -165,35 +216,78 @@ grid_map::Position CvrLseProcess::ObtainCurrentMapPosition(const PoseInfo &vehPo
 	return grid_map::Position {mapPose.x(), mapPose.y()};
 }
 
-void CvrLseProcess::PreProcessPointCloud(const CloudInfo& cloud_info, ScanAll& scan_obstacle_info,
-	ScanAll& scan_ground_info) {
-	const auto& label_info = cloud_info.second;
-	const auto& clou_info = cloud_info.first;
-	for (size_t i = 0U; i < clou_info.size(); ++i) {
-		const auto& point = clou_info[i];
-		auto point_index = ObtainIndexOfPoint(point);
-		if (label_info.label[i] == 0U) {
-			scan_obstacle_info[point_index].emplace_back(point.x, point.y, point.z, 0U, point.timestamp,
-				label_info.isHeightValid[i], label_info.height[i], point.ring);
-		} else {
-			scan_ground_info[point_index].emplace_back(point.x, point.y, point.z, 1U, point.timestamp,
-				label_info.isHeightValid[i], label_info.height[i], point.ring);
-		}
-	}
+void CvrLseProcess::PreProcessPointCloud(const multi_cloud_label& cloud_info, std::vector<ScanAll>& scan_obstacle_info,
+	std::vector<ScanAll>& scan_ground_info) {
+    scan_obstacle_info.resize(ground_segmentation::LidarSize);
+    scan_ground_info.resize(ground_segmentation::LidarSize);
+    for (auto lidar_id = ground_segmentation::Main; lidar_id < ground_segmentation::LidarSize;
+        lidar_id = static_cast<ground_segmentation::LidarID>(lidar_id + 1)) {
+        scan_obstacle_info[lidar_id].resize(static_cast<size_t>(360.0 / param_.horizontal_resolution));
+        scan_ground_info[lidar_id].resize(static_cast<size_t>(360.0 / param_.horizontal_resolution));
+        pcl::PointCloud<PointXYZIRT> point_info;
+        std::vector<cvr_lse::label_point> label_info;
+        if (lidar_id == ground_segmentation::Main) {
+            label_info = cloud_info.main_label_cloud;
+            pcl::fromROSMsg(cloud_info.main_point_cloud, point_info);
+        } else if (lidar_id == ground_segmentation::Left) {
+            label_info = cloud_info.left_label_cloud;
+            pcl::fromROSMsg(cloud_info.left_point_cloud, point_info);
+        } else if (lidar_id == ground_segmentation::Right) {
+            label_info = cloud_info.right_label_cloud;
+            pcl::fromROSMsg(cloud_info.right_point_cloud, point_info);
+        } else if (lidar_id == ground_segmentation::Rear) {
+            label_info = cloud_info.rear_label_cloud;
+            pcl::fromROSMsg(cloud_info.rear_point_cloud, point_info);
+        } else {
+            continue;
+        }
+        PreProcessSinglePointCloud(label_info, point_info, scan_obstacle_info[lidar_id],
+            scan_ground_info[lidar_id]);
+    }
+    //
+//    pcl::PointCloud<PointXYZIRT> obstacle_cloud;
+//    obstacle_cloud.header.stamp = cloud_info.header.stamp.toNSec();
+//    obstacle_cloud.header.frame_id = "lidar_link";
+//    for (const auto& obstacle : scan_obstacle_info) {
+//        if (!obstacle.empty()) {
+//            PointXYZIRT point{};
+//            point.x = static_cast<float>(obstacle.front().x());
+//            point.y = static_cast<float>(obstacle.front().y());
+//            point.z = static_cast<float>(obstacle.front().z());
+//            obstacle_cloud.push_back(point);
+//        }
+//    }
+//    obstacle_pub_.publish(obstacle_cloud);
+    //
+}
 
-	for (auto& scan_ray : scan_obstacle_info) {
-		std::sort(scan_ray.begin(), scan_ray.end(), [](const ScanPoint& point_a, const ScanPoint&
-			point_b) {
-			return point_a.GetDistance() < point_b.GetDistance();
-		});
-	}
+void CvrLseProcess::PreProcessSinglePointCloud(const std::vector<cvr_lse::label_point>& label_point_info,
+    const pcl::PointCloud<PointXYZIRT>& point_info, ScanAll& obstacle_points, ScanAll& ground_points) {
+    for (size_t i = 0U; i < point_info.size(); ++i) {
+        const auto& point = point_info[i];
+        auto point_index = ObtainIndexOfPoint(point);
+        if (label_point_info[i].label == 0U) {
+            obstacle_points[point_index].emplace_back(point.x, point.y, point.z, 0U, point.timestamp,
+                label_point_info[i].is_height_valid, label_point_info[i].height, point.ring);
+        } else {
+            ground_points[point_index].emplace_back(point.x, point.y, point.z, 1U, point.timestamp,
+                label_point_info[i].is_height_valid, label_point_info[i].height, point.ring);
+        }
+    }
 
-	for (auto& scan_ray : scan_ground_info) {
-		std::sort(scan_ray.begin(), scan_ray.end(), [](const ScanPoint& point_a, const ScanPoint&
-			point_b) {
-			return point_a.GetDistance() < point_b.GetDistance();
-		});
-	}
+    for (auto& scan_ray : obstacle_points) {
+        std::sort(scan_ray.begin(), scan_ray.end(), [](const ScanPoint& point_a, const ScanPoint&
+        point_b) {
+            return point_a.GetDistance() < point_b.GetDistance();
+        });
+    }
+
+    for (auto& scan_ray : ground_points) {
+        std::sort(scan_ray.begin(), scan_ray.end(), [](const ScanPoint& point_a, const ScanPoint&
+        point_b) {
+            return point_a.GetDistance() < point_b.GetDistance();
+        });
+    }
 }
 
 size_t CvrLseProcess::ObtainIndexOfPoint(const PointXYZIRT& point) const {
@@ -204,52 +298,76 @@ size_t CvrLseProcess::ObtainIndexOfPoint(const PointXYZIRT& point) const {
 	return static_cast<size_t>(angle / M_PI * 180 / param_.horizontal_resolution);
 }
 
-void CvrLseProcess::TranformScanPointToOdom(ScanPoint &point) {
-	Eigen::Vector3d veh_point = ext_rot_veh_lidar_.matrix() * point.GetLidarPointInfo() + ext_trans_veh_lidar_;
+void CvrLseProcess::TranformScanPointToOdom(const ground_segmentation::LidarID& lidar_id, ScanPoint &point) {
+	Eigen::Vector3d veh_point = ext_transform_matrix_veh_lidar_[lidar_id] * point.GetLidarPointInfo();
 	point.SetVehiclePointInfo(veh_point);
-	auto veh_quat = Eigen::AngleAxisd(cur_lidar_pos_.yaw, Eigen::Vector3d::UnitZ()) *
-	                Eigen::AngleAxisd(cur_lidar_pos_.pitch, Eigen::Vector3d::UnitY()) *
-	                Eigen::AngleAxisd(cur_lidar_pos_.roll, Eigen::Vector3d::UnitX());
-	Eigen::Vector3d odom_point = veh_quat.matrix() * point.GetLidarPointInfo() +
-		Eigen::Vector3d(cur_lidar_pos_.x, cur_lidar_pos_.y, cur_lidar_pos_.z);
+	auto lidar_quat = Eigen::AngleAxisd(cur_lidar_pos_[lidar_id].yaw, Eigen::Vector3d::UnitZ()) *
+	                Eigen::AngleAxisd(cur_lidar_pos_[lidar_id].pitch, Eigen::Vector3d::UnitY()) *
+	                Eigen::AngleAxisd(cur_lidar_pos_[lidar_id].roll, Eigen::Vector3d::UnitX());
+	Eigen::Vector3d odom_point = lidar_quat.matrix() * point.GetLidarPointInfo() +
+		Eigen::Vector3d(cur_lidar_pos_[lidar_id].x, cur_lidar_pos_[lidar_id].y, cur_lidar_pos_[lidar_id].z);
 	point.SetOdomPointInfo(odom_point);
 }
 
-void CvrLseProcess::UpdateGridMap(ScanAll& scan_obstacle_Info) {
+void CvrLseProcess::UpdateGridMap(const ground_segmentation::LidarID& lidar_id,
+    std::vector<ScanAll>& scan_obstacle_Info, std::vector<ScanAll>& scan_ground_info) {
 	constexpr double height_threshold = 1.8;
 	const double angle_step = param_.horizontal_resolution / 180.0 * M_PI;
 	double current_angle = -M_PI - angle_step;
-	for (auto& scan_Obstacle : scan_obstacle_Info) {
-		bool scan_valid_flag = false;
-		current_angle += angle_step;
-		if (scan_Obstacle.empty()) {
-			continue;
-		}
-		for (auto& point : scan_Obstacle) {
-			TranformScanPointToOdom(point);
-			if (point.GetHeightDistance() > height_threshold) {
-				continue;
-			}
-			scan_valid_flag = true;
-			UpdateRay(point);
-			break;
-		}
-		if (!scan_valid_flag) {
-			UpdateInvalidScanPoint(current_angle);
+	for (size_t i = 0U; i < scan_obstacle_Info[lidar_id].size(); ++i) {
+		if (!scan_obstacle_Info[lidar_id][i].empty()) {
+            bool scan_valid_flag = false;
+            current_angle += angle_step;
+            for (auto& point : scan_obstacle_Info[lidar_id][i]) {
+                TranformScanPointToOdom(lidar_id, point);
+                if (point.GetHeightDistance() > height_threshold) {
+                    continue;
+                }
+                scan_valid_flag = true;
+                UpdateRay(lidar_id, point);
+                break;
+            }
+            if (!scan_valid_flag) {
+                UpdateInvalidScanPoint(lidar_id, current_angle);
+            }
+		} else if (!scan_ground_info[lidar_id][i].empty()) {
+		    auto& ground_point = scan_ground_info[lidar_id][i].back();
+            TranformScanPointToOdom(lidar_id, ground_point);
+            UpdateValidGroundPoint(lidar_id, ground_point);
+		} else {
+		    // do nothing
 		}
 	}
 }
 
-void CvrLseProcess::UpdateInvalidScanPoint(const double angleInfo) {
+void CvrLseProcess::UpdateValidGroundPoint(const ground_segmentation::LidarID& lidar_id, const ScanPoint& point) {
+    grid_map::Position start_pose(cur_lidar_pos_[lidar_id].x, cur_lidar_pos_[lidar_id].y);
+    grid_map::Position end_pose(point.GetOdomPointInfo().x(), point.GetOdomPointInfo().y());
+
+    for (grid_map::LineIterator iterator(*map_, start_pose, end_pose);
+         !iterator.isPastEnd(); ++iterator) {
+        const auto& index = *iterator;
+        if (update_flag_(index(0U), index(1U)) != 0U) {
+            continue;
+        }
+        map_->at("prob", *iterator) += free_factor_;
+        if (map_->at("prob", *iterator) < param_.min_odd_threshold) {
+            map_->at("prob", *iterator) = param_.min_odd_threshold;
+        }
+        update_flag_(index(0U), index(1U)) = 1U;
+    }
+}
+
+void CvrLseProcess::UpdateInvalidScanPoint(const ground_segmentation::LidarID& lidar_id, const double angleInfo) {
 	Eigen::Vector3d lidar_invalid_point(param_.max_distance * std::cos(angleInfo),
 		param_.max_distance * std::sin(angleInfo), 0.0);
-	auto vehQuat = Eigen::AngleAxisd(cur_lidar_pos_.yaw, Eigen::Vector3d::UnitZ()) *
-	               Eigen::AngleAxisd(cur_lidar_pos_.pitch, Eigen::Vector3d::UnitY()) *
-	               Eigen::AngleAxisd(cur_lidar_pos_.roll, Eigen::Vector3d::UnitX());
-	Eigen::Vector3d odom_invalid_point = vehQuat.matrix() * lidar_invalid_point +
-	                                     Eigen::Vector3d(cur_lidar_pos_.x, cur_lidar_pos_.y, cur_lidar_pos_.z);
+	auto lidar_quat = Eigen::AngleAxisd(cur_lidar_pos_[lidar_id].yaw, Eigen::Vector3d::UnitZ()) *
+	               Eigen::AngleAxisd(cur_lidar_pos_[lidar_id].pitch, Eigen::Vector3d::UnitY()) *
+	               Eigen::AngleAxisd(cur_lidar_pos_[lidar_id].roll, Eigen::Vector3d::UnitX());
+	Eigen::Vector3d odom_invalid_point = lidar_quat.matrix() * lidar_invalid_point +
+        Eigen::Vector3d(cur_lidar_pos_[lidar_id].x, cur_lidar_pos_[lidar_id].y, cur_lidar_pos_[lidar_id].z);
 
-	grid_map::Position start_pose(cur_lidar_pos_.x, cur_lidar_pos_.y);
+	grid_map::Position start_pose(cur_lidar_pos_[lidar_id].x, cur_lidar_pos_[lidar_id].y);
 	grid_map::Position end_pose(odom_invalid_point.x(), odom_invalid_point.y());
 
 	for (grid_map::LineIterator iterator(*map_, start_pose, end_pose);
@@ -266,8 +384,8 @@ void CvrLseProcess::UpdateInvalidScanPoint(const double angleInfo) {
 	}
 }
 
-void CvrLseProcess::UpdateRay(const ScanPoint &point) {
-	grid_map::Position start_pose(cur_lidar_pos_.x, cur_lidar_pos_.y);
+void CvrLseProcess::UpdateRay(const ground_segmentation::LidarID& lidar_id, const ScanPoint &point) {
+	grid_map::Position start_pose(cur_lidar_pos_[lidar_id].x, cur_lidar_pos_[lidar_id].y);
 	grid_map::Position end_pose(point.GetOdomPointInfo().x(), point.GetOdomPointInfo().y());
 
 	for (grid_map::LineIterator iterator(*map_, start_pose, end_pose);
@@ -297,9 +415,10 @@ void CvrLseProcess::UpdateRay(const ScanPoint &point) {
 	}
 }
 
-void CvrLseProcess::UpdateStitchPolygon(const ScanPoint& pointLast, const ScanPoint& pointCurrent) {
+void CvrLseProcess::UpdateStitchPolygon(const ground_segmentation::LidarID& lidar_id, const ScanPoint& pointLast,
+    const ScanPoint& pointCurrent) {
 	grid_map::Polygon polygon;
-	polygon.addVertex(grid_map::Position(cur_lidar_pos_.x, cur_lidar_pos_.y));
+	polygon.addVertex(grid_map::Position(cur_lidar_pos_[lidar_id].x, cur_lidar_pos_[lidar_id].y));
 	polygon.addVertex(grid_map::Position(pointLast.x(), pointLast.y()));
 	polygon.addVertex(grid_map::Position(pointCurrent.x(), pointCurrent.y()));
 

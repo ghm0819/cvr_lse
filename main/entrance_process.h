@@ -38,9 +38,7 @@ public:
 
 	~EntranceProcess() = default;
 
-	void PointCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg);
-
-	void PointLabelCallback(const cvr_lse::cloud_label::ConstPtr& label_msg);
+	void PointLabelCallback(const cvr_lse::multi_cloud_label::ConstPtr& label_msg);
 
 	void LidarOdometryCallback(const nav_msgs::Odometry::ConstPtr& lidar_odo_msg);
 
@@ -61,7 +59,7 @@ private:
 
 	bool LoadParameterForCvrLse();
 
-	bool FindCorrespondingInfo(CloudInfo& cloud_info);
+//	bool FindCorrespondingInfo(CloudInfo& cloud_info);
 
 	std::thread main_processer_;
 
@@ -77,19 +75,17 @@ private:
 
 	std::mutex label_lock_;
 
-	std::deque<cvr_lse::cloud_label> cloud_label_msg_;
-
-	std::deque<sensor_msgs::PointCloud2> cloud_msg_;
+	std::deque<cvr_lse::multi_cloud_label> cloud_label_msg_;
 
 #ifdef Ground
 	ros::Publisher ground_pub_;
 	ros::Publisher obstacle_pub_;
 
-	void VisualizationGroundPoint(const pcl::PointCloud<PointXYZIRT>& cloud,
-		const cvr_lse::cloud_label& label_info);
+//	void VisualizationGroundPoint(const pcl::PointCloud<PointXYZIRT>& cloud,
+//		const cvr_lse::cloud_label& label_info);
 #else
 #define VisualizationGroundPoint(cloud, labelInfo);
 #endif
-	};
+};
 }
 #endif //CVR_LSE_ENTRANCE_PROCESS_H

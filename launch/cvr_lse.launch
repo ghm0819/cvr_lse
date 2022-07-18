@@ -10,7 +10,7 @@
   <arg name="project" default="cvr_lse"/>
   <node name="cvr_lse" pkg="cvr_lse" type="cvr_lse" output="screen">
     <rosparam command="load" file="$(find cvr_lse)/config/cvr_lse_params.yaml"/>
-    <param name = "lidar_topic" value = "/hesai40p_points_xyzirt" />
+    <param name = "lidar_topic" value = "/velodyne_points" />
     <param name = "cloud_label_topic" value = "/ground_segmentation/cloud_label"/>
     <param name = "lidar_odom_topic" value = "/odometry/imu" />
     <param name = "ground_output_topic" value = "/cvr_lse/ground_cloud" />
@@ -19,7 +19,7 @@
 
   <node name="ground_segmentation" pkg="cvr_lse" type="ground_segmentation" output="screen">
     <rosparam command="load" file="$(find cvr_lse)/config/segmentation_params.yaml"/>
-    <param name = "lidar_topic" value = "/hesai40p_points_xyzirt" />
+    <param name = "lidar_topic" value = "/velodyne_points" />
     <param name = "cloud_label_topic" value = "/ground_segmentation/cloud_label" />
   </node>
   <node pkg="rviz" type="rviz" name="$(arg project)_rviz" args="-d $(find cvr_lse)/config/rviz.rviz" />

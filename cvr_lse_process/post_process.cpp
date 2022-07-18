@@ -17,7 +17,7 @@ void convert1to3Channel(cv::Mat& src, cv::Mat& dst) {
 	cv::merge(&channels[0], channels.size(), dst);
 }
 void PostProcess::ProcessGridMap(const grid_map::GridMap& grid_map,
-	std::vector<std::vector<cv::Point2f>>& find_contour) const {
+	std::vector<ConvexHullf>& find_contour) const {
 	cv::Mat occupancy_map_info; // the obstacle information
 	cv::Mat free_map_Info; // the free space information
 	const auto& size = grid_map.getSize();
@@ -47,7 +47,7 @@ void PostProcess::ProcessGridMap(const grid_map::GridMap& grid_map,
 }
 
 void PostProcess::ProcessOccupancyMap(const grid_map::GridMap& grid_map, const cv::Mat& occupancy_img,
-	std::vector<std::vector<cv::Point2f>>& find_contour) {
+	std::vector<ConvexHullf>& find_contour) {
 	static int num = 0;
 	cv::Mat out;
 	cv::Mat element_one = getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
@@ -58,33 +58,33 @@ void PostProcess::ProcessOccupancyMap(const grid_map::GridMap& grid_map, const c
 	cv::dilate(out, out, element);
 
 	std::vector<cv::Vec4i> hierarchy;
-	std::vector<std::vector<cv::Point>> contours;
+	std::vector<ConvexHulli> contours;
 	cv::findContours(out, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-	std::vector<ConvexHull> convex_hull;
+	std::vector<ConvexHulli> convex_hull;
 	ProcessContourInfo(contours, convex_hull);
 	find_contour.clear();
 
 	for (const auto& convex_single : convex_hull) {
-		std::vector<cv::Point2f> points_temp;
+        ConvexHullf points_temp;
 		for (const auto& point : convex_single) {
 			grid_map::Position pt;
 			grid_map.getPosition(grid_map::Index(point.y, point.x), pt);
 			points_temp.emplace_back(pt.x(), pt.y());
 		}
-		std::vector<cv::Point2f> final_contour;
+        ConvexHullf final_contour;
 		cv::convexHull(points_temp, final_contour);
 		find_contour.emplace_back(final_contour);
 	}
 	num_img++;
 }
 
-void PostProcess::ProcessContourInfo(std::vector<std::vector<cv::Point>>& contours,
-	std::vector<ConvexHull>& convex_hull) {
+void PostProcess::ProcessContourInfo(std::vector<ConvexHulli>& contours,
+	std::vector<ConvexHulli>& convex_hull) {
 	convex_hull.clear();
-	for(auto& contour : contours) {
-		std::vector<ConvexHull> convex_hull_temp;
-
+    constexpr int iterator_num = 50;
+    for(auto& contour : contours) {
+		std::vector<ConvexHulli> convex_hull_temp;
 		SimplifyContour(contour);
 		if (contour.size() <= 3U) {
 			convex_hull.emplace_back(contour);
@@ -95,30 +95,82 @@ void PostProcess::ProcessContourInfo(std::vector<std::vector<cv::Point>>& contou
 		for (auto iter = contour.rbegin(); iter != contour.rend(); ++iter) {
 			vertices.emplace_back(cxd::Vec2({static_cast<float>(iter->x), static_cast<float>(iter->y)}));
 		}
-		cxd::ConcavePolygon concave_polygon(vertices);
-		concave_polygon.ConvexDecomp();
-		std::vector<cxd::ConcavePolygon> sub_polygon_list;
-		concave_polygon.ReturnLowestLevelPolys(sub_polygon_list);
-		for (const auto& polygon : sub_polygon_list) {
-			ConvexHull convex_temp;
-			convex_temp.clear();
-			const auto& polygon_vertices = polygon.GetVertices();
-			for (const auto& point : polygon_vertices) {
-				convex_temp.emplace_back(static_cast<int>(point.position.x), static_cast<int>(point.position.y));
-			}
-			convex_hull_temp.emplace_back(convex_temp);
-		}
-		convex_hull.insert(convex_hull.end(), convex_hull_temp.begin(), convex_hull_temp.end());
+        std::queue<std::vector<cxd::Vertex>> open_vertices;
+        std::vector<std::vector<cxd::Vertex>> close_vertices;
+        if (IsConcavePolygon(vertices)) {
+            open_vertices.emplace(vertices);
+        } else {
+            close_vertices.emplace_back(vertices);
+        }
+        int current_num = 0;
+        while(!open_vertices.empty()) {
+            ++current_num;
+            auto current_vertices = open_vertices.front();
+            open_vertices.pop();
+            cxd::ConcavePolygon concavePoly(current_vertices);
+            concavePoly.ConvexDecomp();
+            const auto& left_vertices = concavePoly.GetLeftVertices();
+            const auto& right_vertices = concavePoly.GetRightVertices();
+            if (left_vertices.empty() || right_vertices.empty()) {
+                close_vertices.emplace_back(current_vertices);
+                continue;
+            }
+            if ((left_vertices.size() <= 3) || (!IsConcavePolygon(left_vertices))) {
+                close_vertices.emplace_back(left_vertices);
+            } else {
+                open_vertices.emplace(left_vertices);
+            }
+
+            if ((right_vertices.size() <= 3) || (!IsConcavePolygon(right_vertices))) {
+                close_vertices.emplace_back(right_vertices);
+            } else {
+                open_vertices.emplace(right_vertices);
+            }
+            if (current_num > iterator_num) {
+                break;
+            }
+        }
+        while (!open_vertices.empty()) {
+            close_vertices.emplace_back(open_vertices.front());
+            open_vertices.pop();
+        }
+
+        for (const auto& polygon : close_vertices) {
+            ConvexHulli convexTemp;
+            convexTemp.clear();
+            for (const auto& point : polygon) {
+                convexTemp.emplace_back(static_cast<int>(point.position.x),
+                    static_cast<int>(point.position.y));
+            }
+            convex_hull_temp.emplace_back(convexTemp);
+        }
+        convex_hull.insert(convex_hull.end(), convex_hull_temp.begin(),
+            convex_hull_temp.end());
 	}
 }
 
-void PostProcess::GenerateSingleConvexHull(const std::vector<cv::Point>& contour, std::vector<ConvexHull>& convexHull) {
+bool PostProcess::IsConcavePolygon(const std::vector<cxd::Vertex>& vertices) {
+    for (size_t i = 0U; i < vertices.size(); ++i) {
+        float handedness = cxd::Vertex::GetHandedness(
+                vertices[Mod(static_cast<int>(i) - 1,
+                             static_cast<int>(vertices.size()))],
+                vertices[i],
+                vertices[Mod(static_cast<int>(i) + 1,
+                             static_cast<int>(vertices.size()))]);
+        if (handedness < 0.0f) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void PostProcess::GenerateSingleConvexHull(const ConvexHulli& contour, std::vector<ConvexHulli>& convexHull) {
 	convexHull.clear();
 	if (contour.size() <= 3U) {
 		convexHull.emplace_back(contour);
 		return;
 	}
-	ConvexHull convexTemp;
+	ConvexHulli convexTemp;
 	std::vector<size_t> convexIndex;
 	convexTemp.emplace_back(contour[0U]);
 	convexTemp.emplace_back(contour[1U]);
@@ -151,13 +203,13 @@ void PostProcess::GenerateSingleConvexHull(const std::vector<cv::Point>& contour
 	convexHull.emplace_back(convexTemp);
 }
 
-bool PostProcess::CheckConvexHullInvaild(const std::vector<cv::Point>& contour,
-	const std::vector<cv::Point>& checkPoints, const std::vector<size_t>& curIndex) {
+bool PostProcess::CheckConvexHullInvaild(const ConvexHulli& contour, const ConvexHulli& checkPoints,
+    const std::vector<size_t>& curIndex) {
 	constexpr size_t convexSize = 3U;
 	if (contour.size() < convexSize) {
 		return false;
 	}
-	std::vector<cv::Point> finalContour;
+    ConvexHulli finalContour;
 	cv::convexHull(contour, finalContour);
 	for (size_t i = 0U; i < checkPoints.size(); ++i) {
 		auto result = std::find(curIndex.begin(), curIndex.end(), i);
@@ -171,11 +223,11 @@ bool PostProcess::CheckConvexHullInvaild(const std::vector<cv::Point>& contour,
 	return false;
 }
 
-void PostProcess::SimplifyContour(std::vector<cv::Point>& contour) {
+void PostProcess::SimplifyContour(ConvexHulli& contour) {
 	if (contour.size() <= 2U) {
 		return;
 	}
-	std::vector<cv::Point> cur_contour;
+    ConvexHulli cur_contour;
 	cur_contour.swap(contour);
 	// anti clock-wise
 	std::deque<std::pair<size_t, size_t>> index_vec;
@@ -239,5 +291,30 @@ bool PostProcess::JudgePointLeft(const cv::Point& p1, const cv::Point& p2, const
 	auto value = (p1.x- p3.x) * (p2.y - p3.y) - (p1.y - p3.y) * (p2.x - p3.x);
 	return (value >= 0);
 }
+
+void PostProcess::ExpandContour(const ConvexHulli& contour, ConvexHullf& final_list) const {
+    int count = static_cast<int>(contour.size());
+    final_list.clear();
+    final_list.resize(count);
+    ConvexHullf dp_list(count);
+    ConvexHullf ndp_list(count);
+
+    for (int i = 0; i < count; ++i) {
+        int next = (i == (count - 1) ? 0 : i + 1);
+        dp_list[i] = (contour[next] - contour[i]);
+        float unit_length = 1.0f / (std::sqrt(dp_list[i].dot(dp_list[i])));
+        ndp_list[i] = (dp_list[i] * unit_length);
+    }
+
+    for (int i = 0; i < count; ++i) {
+        int start_index = ((i == 0) ? (count - 1) : (i - 1));
+        int end_index = i;
+        auto sin_theta = ndp_list[start_index].cross(ndp_list[end_index]);
+        cv::Point2f orient_vector = ndp_list[end_index] - ndp_list[start_index];
+        final_list[i].x = contour[i].x - param_.map_resolution * 0.5 / sin_theta * orient_vector.x;
+        final_list[i].y = contour[i].y - param_.map_resolution * 0.5 / sin_theta * orient_vector.y;
+    }
+}
+
 }
 }

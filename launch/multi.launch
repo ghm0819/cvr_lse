@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<launch>
+    <param name="/use_sim_time" value="true"/>
+    <arg name="project" default="cvr_lse"/>
+    <rosparam file="$(find lidar_odo)/config/params.yaml" command="load" />
+    <node pkg="lidar_odo" type="lidar_odo_imuPreintegration"   name="lidar_odo_imuPreintegration"    output="screen" 	respawn="true"/>
+    <node pkg="lidar_odo" type="lidar_odo_imageProjection"     name="lidar_odo_imageProjection"      output="screen"     respawn="true"/>
+    <node pkg="lidar_odo" type="lidar_odo_mapOptmization"      name="lidar_odo_mapOptmization"       output="screen"     respawn="true"/>
+
+
+    <node name="cvr_lse" pkg="cvr_lse" type="cvr_lse" output="screen">
+        <rosparam command="load" file="$(find cvr_lse)/config/cvr_lse_params.yaml"/>
+        <param name = "lidar_topic" value = "/apollo_sensor_hesai40_PointCloud2" />
+        <param name = "cloud_label_topic" value = "/ground_segmentation/cloud_label"/>
+        <param name = "lidar_odom_topic" value = "/odometry/imu" />
+        <param name = "ground_output_topic" value = "/cvr_lse/ground_cloud" />
+        <param name = "obstacle_output_topic" value = "/cvr_lse/obstacle_cloud" />
+    </node>
+
+    <node pkg="tf" type="static_transform_publisher" name="main_to_base_link"
+          args="-0.0581933 3.07625 1.56302 -0.0195924 0.00771786 0.719613 0.694056 base_link main_lidar_link 50" />
+    <node pkg="tf" type="static_transform_publisher" name="left_to_main_link"
+          args="0.243332 0.699051 -1.32942 0.00840856 -0.0164247 0.248752 0.968392 main_lidar_link left_lidar_link 50" />
+    <node pkg="tf" type="static_transform_publisher" name="right_to_main_link"
+          args="0.303802 -0.666534 -1.34038 0.00652891 -0.00987211 -0.241255 0.970389 main_lidar_link right_lidar_link 50" />
+    <node pkg="tf" type="static_transform_publisher" name="rear_to_main_link"
+          args="-3.64768 0.124779 -1.63426 -0.0183758 -0.00398884 0.999084 -0.0384245 main_lidar_link rear_lidar_link 50" />
+    <node name="ground_segmentation" pkg="cvr_lse" type="ground_segmentation" output="screen">
+        <rosparam command="load" file="$(find cvr_lse)/config/segmentation_params.yaml"/>
+        <param name = "lidar_topic" value = "/apollo_sensor_hesai40_PointCloud2" />
+        <param name = "left_lidar_topic" value = "/apollo_driver_RoboSensor_front_left_rs16_PointCloud2" />
+        <param name = "right_lidar_topic" value = "/apollo_driver_RoboSensor_front_right_rs16_PointCloud2" />
+        <param name = "rear_lidar_topic" value = "/apollo_driver_RoboSensor_rear_center_rs16_PointCloud2" />
+        <param name = "cloud_label_topic" value = "/ground_segmentation/cloud_label" />
+    </node>
+    <node pkg="rviz" type="rviz" name="$(arg project)_rviz" args="-d $(find cvr_lse)/config/rviz.rviz" />
+</launch>

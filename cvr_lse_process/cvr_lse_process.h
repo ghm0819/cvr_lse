@@ -36,7 +36,6 @@
 #include "post_process.h"
 
 namespace cvr_lse {
-using CloudInfo = std::pair<pcl::PointCloud<PointXYZIRT>, cvr_lse::cloud_label>;
 namespace lse_map {
 class CvrLseProcess {
 public:
@@ -48,11 +47,13 @@ public:
 		obstacle_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacle", 1);
 		map_pub_ = nh_.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
 		convex_Marker_Pub_ = nh_.advertise<visualization_msgs::MarkerArray>("convex", 1);
+        cur_lidar_pos_.resize(ground_segmentation::LidarSize);
+        last_lidar_pos_.resize(ground_segmentation::LidarSize);
 	};
 
 	~CvrLseProcess() = default;
 
-	void Process(const CloudInfo &cloud_info, const PoseInfo &pose_info);
+	void Process(const multi_cloud_label& cloud_info, const PoseInfo& pose_info);
 
 private:
 	void InitCvrLse();
@@ -64,31 +65,41 @@ private:
 
 	void InitialThresholdInfo();
 
-	PoseInfo TranformFromVehicleToLidar(const PoseInfo& vehPose);
+	PoseInfo TranformFromVehicleToLidar(const PoseInfo& veh_pose, const ground_segmentation::LidarID& lidar_id);
 
-	PoseInfo TranformFromLidarToVehicle(const PoseInfo& lidar_pose);
+	PoseInfo TranformFromLidarToVehicle(const PoseInfo& lidar_pose, const ground_segmentation::LidarID& lidar_id);
+
+	void TransformFromVehicleToAuxiliaryLidars(const PoseInfo& veh_pose);
 
 	void QuaternionToEuler(const Eigen::Quaterniond& q_info, double& roll, double& pitch, double& yaw);
 
 	grid_map::Position ObtainCurrentMapPosition(const PoseInfo& vehPose) const;
 
-	void PreProcessPointCloud(const CloudInfo& point_a, ScanAll& point_b, ScanAll& scan_ground_info);
+	void PreProcessPointCloud(const multi_cloud_label& cloud_info, std::vector<ScanAll>& scan_obstacle_info,
+        std::vector<ScanAll>& scan_ground_info);
+
+    void PreProcessSinglePointCloud(const std::vector<cvr_lse::label_point>& label_point_info,
+        const pcl::PointCloud<PointXYZIRT>& point_info, ScanAll& obstacle_points, ScanAll& ground_points);
 
 	size_t ObtainIndexOfPoint(const PointXYZIRT& point) const;
 
-	void UpdateRay(const ScanPoint& point);
+	void UpdateRay(const ground_segmentation::LidarID& lidar_id, const ScanPoint& point);
 
-	void UpdateInvalidScanPoint(const double angleInfo);
+    void UpdateValidGroundPoint(const ground_segmentation::LidarID& lidar_id, const ScanPoint& point);
 
-	void UpdateStitchPolygon(const ScanPoint& pointLast, const ScanPoint& pointCurrent);
+	void UpdateInvalidScanPoint(const ground_segmentation::LidarID& lidar_id,const double angleInfo);
 
-	void UpdateGridMap(ScanAll& scan_obstacle_Info);
+	void UpdateStitchPolygon(const ground_segmentation::LidarID& lidar_id, const ScanPoint& pointLast,
+        const ScanPoint& pointCurrent);
+
+	void UpdateGridMap(const ground_segmentation::LidarID& lidar_id, std::vector<ScanAll>& scan_obstacle_Info,
+        std::vector<ScanAll>& scan_ground_info);
 
 	void PublishGridMap(const grid_map::GridMap& submap);
 
 	void PublishContours(const std::vector<std::vector<cv::Point2f>>& contours);
 
-	void TranformScanPointToOdom(ScanPoint& point);
+	void TranformScanPointToOdom(const ground_segmentation::LidarID& lidar_id, ScanPoint& point);
 
 	ros::NodeHandle nh_;
 
@@ -100,11 +111,9 @@ private:
 
 	std::shared_ptr<postprocess::PostProcess> post_process_;
 
-	CloudInfo cloud_info_;
-
 	// pose info
-	PoseInfo cur_lidar_pos_;
-	PoseInfo last_lidar_pos_;
+	std::vector<PoseInfo> cur_lidar_pos_;
+	std::vector<PoseInfo> last_lidar_pos_;
 	PoseInfo cur_veh_pos_;
 	PoseInfo last_veh_pos_;
 	grid_map::Position map_position_;
@@ -117,12 +126,8 @@ private:
 	float free_factor_{};
 
 	// ext parameters
-	Eigen::Quaterniond ext_rot_lidar_veh_;
-	Eigen::Vector3d ext_trans_lidar_veh_;
-	Eigen::Isometry3d ext_transform_matrix_lidar_veh_ = Eigen::Isometry3d::Identity();
-	Eigen::Quaterniond ext_rot_veh_lidar_;
-	Eigen::Vector3d ext_trans_veh_lidar_;
-	Eigen::Isometry3d ext_transform_matrix_veh_lidar_ = Eigen::Isometry3d::Identity();
+	std::vector<Eigen::Isometry3d> ext_transform_matrix_lidar_veh_;
+	std::vector<Eigen::Isometry3d> ext_transform_matrix_veh_lidar_;
 	// visualization
 	ros::Publisher convex_Marker_Pub_;
 	ros::Publisher obstacle_pub_;

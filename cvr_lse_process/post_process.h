@@ -32,9 +32,7 @@ struct CvrLseParameters {
 		horizontal_resolution(0.2),
 		max_odd_threshold(20.0),
 		min_odd_threshold(-10.0),
-		max_distance(100.0) {
-		extRot[0] = 1.0;
-	}
+		max_distance(100.0) {}
 
 	double offset_x;
 	double offset_y;
@@ -51,8 +49,17 @@ struct CvrLseParameters {
 	double max_odd_threshold;
 	double min_odd_threshold;
 	double max_distance;
-	std::vector<double> extRot{4, 0.0};
-	std::vector<double> extTran{3, 0.0};
+	std::vector<double> extrinsic_rot{4, 0.0};
+	std::vector<double> extrinsic_trans{3, 0.0};
+
+    std::vector<double> extrinsic_rot_left{4, 0.0};
+    std::vector<double> extrinsic_trans_left{3, 0.0};
+
+    std::vector<double> extrinsic_rot_right{4, 0.0};
+    std::vector<double> extrinsic_trans_right{3, 0.0};
+
+    std::vector<double> extrinsic_rot_rear{4, 0.0};
+    std::vector<double> extrinsic_trans_rear{3, 0.0};
 };
 
 enum GridStatus {
@@ -62,7 +69,8 @@ enum GridStatus {
 };
 namespace postprocess {
 
-using ConvexHull = std::vector<cv::Point>;
+using ConvexHulli = std::vector<cv::Point>;
+using ConvexHullf = std::vector<cv::Point2f>;
 
 class PostProcess {
 public:
@@ -85,18 +93,27 @@ private:
 	static void ProcessOccupancyMap(const grid_map::GridMap& grid_map, const cv::Mat& occupancy_img,
 	                                std::vector<std::vector<cv::Point2f>>& find_contour);
 
-	static void ProcessContourInfo(std::vector<std::vector<cv::Point>>& contours, std::vector<ConvexHull>& convex_hull);
+	static void ProcessContourInfo(std::vector<ConvexHulli>& contours, std::vector<ConvexHulli>& convex_hull);
 
-	static void SimplifyContour(std::vector<cv::Point>& contour);
+	static void SimplifyContour(ConvexHulli& contour);
 
-	static void GenerateSingleConvexHull(const std::vector<cv::Point>& contour, std::vector<ConvexHull>& convexHull);
+	static void GenerateSingleConvexHull(const ConvexHulli& contour, std::vector<ConvexHulli>& convexHull);
 
 	static void CalculateLineParameters(const cv::Point& p1, const cv::Point& p2, double& a, double& b, double& c);
 
 	static bool JudgePointLeft(const cv::Point& p1, const cv::Point& p2, const cv::Point& p3);
 
-	static bool CheckConvexHullInvaild(const std::vector<cv::Point>& contour, const std::vector<cv::Point>& checkPoints,
-		const std::vector<size_t>& curIndex) ;
+	static bool CheckConvexHullInvaild(const ConvexHulli& contour, const ConvexHulli& checkPoints,
+		const std::vector<size_t>& curIndex);
+
+    static bool IsConcavePolygon(const std::vector<cxd::Vertex>& vertices);
+
+    static int Mod(const int x, const int m) {
+        int r = x % m;
+        return ((r < 0) ? (r + m) : r);
+    }
+
+    void ExpandContour(const ConvexHulli& contour, ConvexHullf& final_list) const;
 
 	ros::NodeHandle nh_;
 

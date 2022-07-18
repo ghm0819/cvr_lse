@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.3)
 project(cvr_lse)
 
 set(CMAKE_BUILD_TYPE "Release")
-set(CMAKE_CXX_FLAGS "-std=c++11")
+set(CMAKE_CXX_FLAGS "-std=c++14")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g -pthread")
 
 ### for visualization
@@ -39,10 +39,21 @@ include_directories(${Eigen_INCLUDE_DIRS})
 add_message_files(
 	DIRECTORY msg
 	FILES
-	cloud_label.msg
+	label_point.msg
 )
 
-generate_messages(DEPENDENCIES std_msgs)
+add_message_files(
+    DIRECTORY msg
+    FILES
+    multi_cloud_label.msg
+)
+
+generate_messages(DEPENDENCIES
+    geometry_msgs
+    std_msgs
+    nav_msgs
+    sensor_msgs
+)
 
 catkin_package(
   	CATKIN_DEPENDS
@@ -52,7 +63,7 @@ include_directories(
 	main
 	ground_detecttion
 	grid_map
-		cvr_lse_process
+	cvr_lse_process
 	${catkin_INCLUDE_DIRS}
 )
 
@@ -86,7 +97,7 @@ set(VR_LSE_SOURCE_FILE
 add_executable(cvr_lse main/entrance_process.cpp ${GROUND_SOURCE_FILE} ${GRID_SOURCE_FILE}
 		${VR_LSE_SOURCE_FILE})
 add_executable(ground_segmentation main/entrance_ground.cpp ${GROUND_SOURCE_FILE})
-
+#
 target_link_libraries(cvr_lse ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
 target_link_libraries(ground_segmentation ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 

@@ -62,10 +62,25 @@ bool EntranceProcess::LoadParameterForCvrLse()
 	                  cvr_lse_params_.min_odd_threshold);
 	nh_.param<double>("cvr_lse/max_distance", cvr_lse_params_.max_distance,
 	                  cvr_lse_params_.max_distance);
-	nh_.param<std::vector<double>>("cvr_lse/extrinsic_trans", cvr_lse_params_.extTran,
-	                               cvr_lse_params_.extTran);
-	nh_.param<std::vector<double>>("cvr_lse/extrinsic_rot", cvr_lse_params_.extRot,
-	                               cvr_lse_params_.extRot);
+	nh_.param<std::vector<double>>("cvr_lse/extrinsic_trans", cvr_lse_params_.extrinsic_trans,
+	                               cvr_lse_params_.extrinsic_trans);
+	nh_.param<std::vector<double>>("cvr_lse/extrinsic_rot", cvr_lse_params_.extrinsic_rot,
+	                               cvr_lse_params_.extrinsic_rot);
+
+    nh_.param<std::vector<double>>("cvr_lse/extrinsic_trans_left", cvr_lse_params_.extrinsic_trans_left,
+                                   cvr_lse_params_.extrinsic_trans_left);
+    nh_.param<std::vector<double>>("cvr_lse/extrinsic_rot_left", cvr_lse_params_.extrinsic_rot_left,
+                                   cvr_lse_params_.extrinsic_rot_left);
+
+    nh_.param<std::vector<double>>("cvr_lse/extrinsic_trans_right", cvr_lse_params_.extrinsic_trans_right,
+                                   cvr_lse_params_.extrinsic_trans_right);
+    nh_.param<std::vector<double>>("cvr_lse/extrinsic_rot_right", cvr_lse_params_.extrinsic_rot_right,
+                                   cvr_lse_params_.extrinsic_rot_right);
+
+    nh_.param<std::vector<double>>("cvr_lse/extrinsic_trans_rear", cvr_lse_params_.extrinsic_trans_rear,
+                                   cvr_lse_params_.extrinsic_trans_rear);
+    nh_.param<std::vector<double>>("cvr_lse/extrinsic_rot_rear", cvr_lse_params_.extrinsic_rot_rear,
+                                   cvr_lse_params_.extrinsic_rot_rear);
 	return true;
 }
 
@@ -74,7 +89,7 @@ void EntranceProcess::LidarOdometryCallback(const nav_msgs::Odometry::ConstPtr &
 	odometry.SetNewOdometryMsg(lidar_odo_msg);
 }
 
-void EntranceProcess::PointLabelCallback(const cvr_lse::cloud_label::ConstPtr &label_msg) {
+void EntranceProcess::PointLabelCallback(const cvr_lse::multi_cloud_label::ConstPtr &label_msg) {
 	std::lock_guard<std::mutex> lock(label_lock_);
 	cloud_label_msg_.emplace_back(*label_msg);
 	if (cloud_label_msg_.size() > 7U) { // size 7U
@@ -82,81 +97,48 @@ void EntranceProcess::PointLabelCallback(const cvr_lse::cloud_label::ConstPtr &l
 	}
 }
 
-void EntranceProcess::PointCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg) {
-	std::lock_guard<std::mutex> lock(cloud_lock_);
-	cloud_msg_.emplace_back(*cloud_msg);
-	if (cloud_msg_.size() > 7U) { // size 7U
-		cloud_msg_.pop_front();
-	}
-}
-
-bool EntranceProcess::FindCorrespondingInfo(CloudInfo& cloud_info) {
-	while ((!cloud_msg_.empty()) && (!cloud_label_msg_.empty())) {
-		if (cloud_msg_.front().header.stamp.toSec() == cloud_label_msg_.front().header.stamp.toSec()) {
-			pcl::PointCloud<PointXYZIRT> cloud;
-			pcl::fromROSMsg(cloud_msg_.front(), cloud);
-			cloud_info = std::make_pair(cloud, cloud_label_msg_.front());
-			cloud_msg_.pop_front();
-			cloud_label_msg_.pop_front();
-			return true;
-		} else if (cloud_msg_.front().header.stamp.toSec() > cloud_label_msg_.front().header.stamp.toSec()) {
-			cloud_label_msg_.pop_front();
-		} else {
-			cloud_msg_.pop_front();
-		}
-	}
-	return false;
-}
-
 void EntranceProcess::MainProcess() {
 	auto &odometry = odometry::Odometry::GetOdometry();
 	while (start_flag_) {
-		if (cloud_msg_.empty() || cloud_label_msg_.empty()) {
+		if (cloud_label_msg_.empty()) {
 			usleep(50000);
 			continue;
 		}
-		CloudInfo cloud_info;
-		{
-			std::lock_guard<std::mutex> lock1(cloud_lock_);
-			std::lock_guard<std::mutex> lock2(label_lock_);
-			if (!FindCorrespondingInfo(cloud_info)) {
-				usleep(50000);
-				continue;
-			}
-		}
 		PoseInfo cur_pose;
-		if (odometry.GetPoseInfoFromTimestamp(static_cast<double>(cloud_info.first.header.stamp) / 1e6,
+        cvr_lse::multi_cloud_label cloud_label_cur;
+        {
+            std::lock_guard<std::mutex> lock(label_lock_);
+            std::swap(cloud_label_cur, cloud_label_msg_.front());
+            cloud_label_msg_.pop_front();
+        }
+		if (odometry.GetPoseInfoFromTimestamp(static_cast<double>(cloud_label_cur.header.stamp.toSec()),
 			cur_pose)) {
-			if (cloud_info.first.size() != cloud_info.second.height.size()) {
-				continue;
-			}
-			cvr_lse_processer_->Process(cloud_info, cur_pose);
-			VisualizationGroundPoint(cloud_info.first, cloud_info.second);
+			cvr_lse_processer_->Process(cloud_label_cur, cur_pose);
 		}
 	}
 }
 
-#ifdef Ground
-void EntranceProcess::VisualizationGroundPoint(const pcl::PointCloud<PointXYZIRT>& cloud,
-	const cvr_lse::cloud_label& label_info) {
-	pcl::PointCloud<PointXYZIRT> ground_cloud;
-	pcl::PointCloud<PointXYZIRT> obstacle_cloud;
-	ground_cloud.header = cloud.header;
-	obstacle_cloud.header = cloud.header;
-	for (size_t i = 0; i < cloud.size(); ++i) {
-		if (label_info.label[i] == 1U) {
-			ground_cloud.push_back(cloud[i]);
-		} else {
-			obstacle_cloud.push_back(cloud[i]);
-		}
-	}
-	sensor_msgs::PointCloud2 temp_cloud;
-	pcl::toROSMsg(ground_cloud, temp_cloud);
-	ground_pub_.publish(temp_cloud);
-	pcl::toROSMsg(obstacle_cloud, temp_cloud);
-	obstacle_pub_.publish(temp_cloud);
-}
-#endif
+//#ifdef Ground
+//void EntranceProcess::VisualizationGroundPoint(const pcl::PointCloud<PointXYZIRT>& cloud,
+//	const cvr_lse::cloud_label& label_info) {
+//	pcl::PointCloud<PointXYZIRT> ground_cloud;
+//	pcl::PointCloud<PointXYZIRT> obstacle_cloud;
+//	ground_cloud.header = cloud.header;
+//	obstacle_cloud.header = cloud.header;
+//	for (size_t i = 0; i < cloud.size(); ++i) {
+//		if (label_info.label[i] == 1U) {
+//			ground_cloud.push_back(cloud[i]);
+//		} else {
+//			obstacle_cloud.push_back(cloud[i]);
+//		}
+//	}
+//	sensor_msgs::PointCloud2 temp_cloud;
+//	pcl::toROSMsg(ground_cloud, temp_cloud);
+//	ground_pub_.publish(temp_cloud);
+//	pcl::toROSMsg(obstacle_cloud, temp_cloud);
+//	obstacle_pub_.publish(temp_cloud);
+//}
+//#endif
 }
 
 int main(int argc, char** argv) {
@@ -171,10 +153,9 @@ int main(int argc, char** argv) {
 	std::string lidar_topic;
 	std::string cloud_label_topic;
 	std::string lidar_odom_topic;
-	nh.param<std::string>("/cvr_lse/lidar_topic", lidar_topic, "/hesai40p_points_xyzirt");
+	nh.param<std::string>("/cvr_lse/lidar_topic", lidar_topic, "/apollo_sensor_hesai40_PointCloud2");
 	nh.param<std::string>("/cvr_lse/cloud_label_topic", cloud_label_topic, "/ground_segmentation/cloud_label");
 	nh.param<std::string>("/cvr_lse/lidar_odom_topic", lidar_odom_topic, "/odometry/imu");
-	point_cloud_sub_ = nh.subscribe(lidar_topic, 1, &cvr_lse::EntranceProcess::PointCloudCallback, &enter_node);
 	point_label_sub_ = nh.subscribe(cloud_label_topic, 1, &cvr_lse::EntranceProcess::PointLabelCallback, &enter_node);
 	lidar_odometry_sub_ = nh.subscribe(lidar_odom_topic, 1, &cvr_lse::EntranceProcess::LidarOdometryCallback,
 		&enter_node);
