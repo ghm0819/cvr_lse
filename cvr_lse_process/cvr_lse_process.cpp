@@ -222,6 +222,9 @@ void CvrLseProcess::UpdateGridMap(ScanAll& scan_obstacle_Info) {
 	for (auto& scan_Obstacle : scan_obstacle_Info) {
 		bool scan_valid_flag = false;
 		current_angle += angle_step;
+		if (scan_Obstacle.empty()) {
+			continue;
+		}
 		for (auto& point : scan_Obstacle) {
 			TranformScanPointToOdom(point);
 			if (point.GetHeightDistance() > height_threshold) {
