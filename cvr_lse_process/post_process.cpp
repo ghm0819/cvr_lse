@@ -7,8 +7,6 @@
 namespace cvr_lse {
 namespace postprocess {
 
-int num_img = 0;
-
 void convert1to3Channel(cv::Mat& src, cv::Mat& dst) {
 	std::vector<cv::Mat> channels;
 	for (int i = 0; i < 3; i++) {
@@ -47,8 +45,7 @@ void PostProcess::ProcessGridMap(const grid_map::GridMap& grid_map,
 }
 
 void PostProcess::ProcessOccupancyMap(const grid_map::GridMap& grid_map, const cv::Mat& occupancy_img,
-	std::vector<ConvexHullf>& find_contour) {
-	static int num = 0;
+	std::vector<ConvexHullf>& find_contour) const {
 	cv::Mat out;
 	cv::Mat element_one = getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
 	cv::dilate(occupancy_img, out, element_one);
@@ -61,30 +58,27 @@ void PostProcess::ProcessOccupancyMap(const grid_map::GridMap& grid_map, const c
 	std::vector<ConvexHulli> contours;
 	cv::findContours(out, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-	std::vector<ConvexHulli> convex_hull;
-	ProcessContourInfo(contours, convex_hull);
-	find_contour.clear();
-
-	for (const auto& convex_single : convex_hull) {
+	// obtain the obstalce inforamtion in the odom
+	std::vector<ConvexHullf> contour_temp;
+    for (const auto& convex_single : contours) {
         ConvexHullf points_temp;
-		for (const auto& point : convex_single) {
-			grid_map::Position pt;
-			grid_map.getPosition(grid_map::Index(point.y, point.x), pt);
-			points_temp.emplace_back(pt.x(), pt.y());
-		}
-        ConvexHullf final_contour;
-		cv::convexHull(points_temp, final_contour);
-		find_contour.emplace_back(final_contour);
-	}
-	num_img++;
+        for (const auto& point : convex_single) {
+            grid_map::Position pt;
+            grid_map.getPosition(grid_map::Index(point.y, point.x), pt);
+            points_temp.emplace_back(pt.x(), pt.y());
+        }
+        contour_temp.emplace_back(points_temp);
+    }
+
+	ProcessContourInfo(contour_temp, find_contour);
 }
 
-void PostProcess::ProcessContourInfo(std::vector<ConvexHulli>& contours,
-	std::vector<ConvexHulli>& convex_hull) {
+void PostProcess::ProcessContourInfo(std::vector<ConvexHullf>& contours,
+	std::vector<ConvexHullf>& convex_hull) const {
 	convex_hull.clear();
     constexpr int iterator_num = 50;
     for(auto& contour : contours) {
-		std::vector<ConvexHulli> convex_hull_temp;
+		std::vector<ConvexHullf> convex_hull_temp;
 		SimplifyContour(contour);
 		if (contour.size() <= 3U) {
 			convex_hull.emplace_back(contour);
@@ -136,11 +130,10 @@ void PostProcess::ProcessContourInfo(std::vector<ConvexHulli>& contours,
         }
 
         for (const auto& polygon : close_vertices) {
-            ConvexHulli convexTemp;
+            ConvexHullf convexTemp;
             convexTemp.clear();
             for (const auto& point : polygon) {
-                convexTemp.emplace_back(static_cast<int>(point.position.x),
-                    static_cast<int>(point.position.y));
+                convexTemp.emplace_back(point.position.x, point.position.y);
             }
             convex_hull_temp.emplace_back(convexTemp);
         }
@@ -223,18 +216,20 @@ bool PostProcess::CheckConvexHullInvaild(const ConvexHulli& contour, const Conve
 	return false;
 }
 
-void PostProcess::SimplifyContour(ConvexHulli& contour) {
+void PostProcess::SimplifyContour(ConvexHullf& contour) const {
+    // Scale polygons equally firstly
+    ExpandContour(contour);
 	if (contour.size() <= 2U) {
 		return;
 	}
-    ConvexHulli cur_contour;
+    ConvexHullf cur_contour;
 	cur_contour.swap(contour);
 	// anti clock-wise
 	std::deque<std::pair<size_t, size_t>> index_vec;
 	index_vec.emplace_back(0U, cur_contour.size() - 1U);
 	std::vector<size_t> valid_Index;
-	constexpr double outer_threshold = 0.5;
-	constexpr double inner_threshold = 1.5;
+	double outer_threshold = 0.5 * param_.map_resolution;
+	double inner_threshold = 1.5 * param_.map_resolution;
 	valid_Index.emplace_back(0U);
 	valid_Index.emplace_back(cur_contour.size() - 1U);
 	while (!index_vec.empty()) {
@@ -281,7 +276,7 @@ void PostProcess::SimplifyContour(ConvexHulli& contour) {
 	}
 }
 
-void PostProcess::CalculateLineParameters(const cv::Point& p1, const cv::Point& p2, double& a, double& b, double& c) {
+void PostProcess::CalculateLineParameters(const cv::Point2f& p1, const cv::Point2f& p2, double& a, double& b, double& c) {
 	a = p2.y - p1.y;
 	b = p1.x - p2.x;
 	c = p2.x * p1.y - p1.x * p2.y;
@@ -292,7 +287,13 @@ bool PostProcess::JudgePointLeft(const cv::Point& p1, const cv::Point& p2, const
 	return (value >= 0);
 }
 
-void PostProcess::ExpandContour(const ConvexHulli& contour, ConvexHullf& final_list) const {
+/**
+ * Scale polygons equally
+ * final list: the input contour
+ */
+void PostProcess::ExpandContour(ConvexHullf& final_list) const {
+    ConvexHullf contour;
+    std::swap(contour, final_list);
     int count = static_cast<int>(contour.size());
     final_list.clear();
     final_list.resize(count);
@@ -311,8 +312,8 @@ void PostProcess::ExpandContour(const ConvexHulli& contour, ConvexHullf& final_l
         int end_index = i;
         auto sin_theta = ndp_list[start_index].cross(ndp_list[end_index]);
         cv::Point2f orient_vector = ndp_list[end_index] - ndp_list[start_index];
-        final_list[i].x = contour[i].x - param_.map_resolution * 0.5 / sin_theta * orient_vector.x;
-        final_list[i].y = contour[i].y - param_.map_resolution * 0.5 / sin_theta * orient_vector.y;
+        final_list[i].x = contour[i].x + param_.map_resolution * 0.5 / sin_theta * orient_vector.x;
+        final_list[i].y = contour[i].y + param_.map_resolution * 0.5 / sin_theta * orient_vector.y;
     }
 }
 

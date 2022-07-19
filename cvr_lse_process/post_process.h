@@ -90,16 +90,14 @@ private:
 		free_threshold_ = std::log(param_.free_threshold / (1.0 - param_.free_threshold));
 	}
 
-	static void ProcessOccupancyMap(const grid_map::GridMap& grid_map, const cv::Mat& occupancy_img,
-	                                std::vector<std::vector<cv::Point2f>>& find_contour);
+	void ProcessOccupancyMap(const grid_map::GridMap& grid_map, const cv::Mat& occupancy_img,
+        std::vector<std::vector<cv::Point2f>>& find_contour) const;
 
-	static void ProcessContourInfo(std::vector<ConvexHulli>& contours, std::vector<ConvexHulli>& convex_hull);
-
-	static void SimplifyContour(ConvexHulli& contour);
+	void ProcessContourInfo(std::vector<ConvexHullf>& contours, std::vector<ConvexHullf>& convex_hull) const;
 
 	static void GenerateSingleConvexHull(const ConvexHulli& contour, std::vector<ConvexHulli>& convexHull);
 
-	static void CalculateLineParameters(const cv::Point& p1, const cv::Point& p2, double& a, double& b, double& c);
+	static void CalculateLineParameters(const cv::Point2f& p1, const cv::Point2f& p2, double& a, double& b, double& c);
 
 	static bool JudgePointLeft(const cv::Point& p1, const cv::Point& p2, const cv::Point& p3);
 
@@ -113,7 +111,9 @@ private:
         return ((r < 0) ? (r + m) : r);
     }
 
-    void ExpandContour(const ConvexHulli& contour, ConvexHullf& final_list) const;
+    void SimplifyContour(ConvexHullf& contour) const;
+
+    void ExpandContour(ConvexHullf& contour) const;
 
 	ros::NodeHandle nh_;
 
