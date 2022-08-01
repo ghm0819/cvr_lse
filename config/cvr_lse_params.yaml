@@ -2,8 +2,8 @@ cvr_lse:
   #grid map configuration
   offset_x: 0.0
   offset_y: 10.0
-  map_width: 60.0
-  map_height: 60.0
+  map_width: 50.0
+  map_height: 50.0
   map_output_width: 40.0
   map_output_height: 40.0
   map_resolution: 0.2
