@@ -11,6 +11,9 @@
 #include <pcl/filters/passthrough.h>
 #include <pcl/common/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/filters/crop_hull.h>
+#include <pcl/surface/concave_hull.h>
+#include <pcl/surface/convex_hull.h>
 #include "cvr_lse/multi_cloud_label.h"
 #include "segment.h"
 namespace cvr_lse {
@@ -119,7 +122,9 @@ private:
 
     void ObtainRangeInformation();
 
-    void RemoveSelfPointCloud(const Eigen::Isometry3f& transform, pcl::PointCloud<PointXYZIRT>& point_cloud);
+    void CropRemoveSelfPointCloud(const Eigen::Isometry3f& transform, pcl::PointCloud<PointXYZIRT>& point_cloud) const;
+
+	void PassRemoveSelfPointCloud(const Eigen::Isometry3f& transform, pcl::PointCloud<PointXYZIRT>& point_cloud) const;
 
 	void AssignCluster(const LidarID lidar_id, const size_t point_size,
         const cvr_lse::multi_cloud_label::Ptr& segmentation);

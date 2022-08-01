@@ -27,7 +27,7 @@ void GroundSegmentation::SegmentProcess(const cvr_lse::multi_cloud_label::Ptr& s
     }
 
     for (auto lidar_id = Main; lidar_id < LidarSize; lidar_id = static_cast<LidarID>(lidar_id + 1)) {
-        RemoveSelfPointCloud(transform_[lidar_id], point_cloud_info[lidar_id]);
+        CropRemoveSelfPointCloud(transform_[lidar_id], point_cloud_info[lidar_id]);
     }
 
     segmentation->main_label_cloud.resize(point_cloud_info[Main].size());
@@ -58,8 +58,8 @@ void GroundSegmentation::SegmentProcess(const cvr_lse::multi_cloud_label::Ptr& s
     segmentation->rear_point_cloud = tempCloud;
 }
 
-void GroundSegmentation::RemoveSelfPointCloud(const Eigen::Isometry3f& transform,
-    pcl::PointCloud<PointXYZIRT>& point_cloud) {
+void GroundSegmentation::PassRemoveSelfPointCloud(const Eigen::Isometry3f &transform,
+    pcl::PointCloud<PointXYZIRT> &point_cloud) const {
     pcl::transformPointCloud(point_cloud, point_cloud, transform);
     pcl::PointCloud<PointXYZIRT>::Ptr laserCloudInTemp = point_cloud.makeShared();
     pcl::PointCloud<PointXYZIRT>::Ptr laserCloudInTempX;
@@ -76,6 +76,49 @@ void GroundSegmentation::RemoveSelfPointCloud(const Eigen::Isometry3f& transform
     pass.setFilterLimits(params_.y_range_min, params_.y_range_max);
     pass.setFilterLimitsNegative(true);
     pass.filter(point_cloud);
+    pcl::transformPointCloud(point_cloud, point_cloud, transform.inverse());
+}
+
+void GroundSegmentation::CropRemoveSelfPointCloud(const Eigen::Isometry3f& transform,
+    pcl::PointCloud<PointXYZIRT>& point_cloud) const {
+    pcl::transformPointCloud(point_cloud, point_cloud, transform);
+    pcl::PointCloud<PointXYZIRT>::Ptr laserCloudInTemp = point_cloud.makeShared();
+
+    pcl::PointCloud<PointXYZIRT>::Ptr bounding_box_ptr(new pcl::PointCloud<PointXYZIRT>);
+    PointXYZIRT point_temp{};
+    point_temp.x = params_.x_range_min;
+    point_temp.y = params_.y_range_min;
+    point_temp.z = 0;
+    bounding_box_ptr->push_back(point_temp);
+    point_temp.x = params_.x_range_min;
+    point_temp.y = params_.y_range_max;
+    point_temp.z = 0;
+    bounding_box_ptr->push_back(point_temp);
+    point_temp.x = params_.x_range_max;
+    point_temp.y = params_.y_range_max;
+    point_temp.z = 0;
+    bounding_box_ptr->push_back(point_temp);
+    point_temp.x = params_.x_range_max;
+    point_temp.y = params_.y_range_min;
+    point_temp.z = 0;
+    bounding_box_ptr->push_back(point_temp);
+
+    pcl::ConvexHull<PointXYZIRT> hull;
+    hull.setInputCloud(bounding_box_ptr);
+    hull.setDimension(2);
+    std::vector<pcl::Vertices> polygons;
+    pcl::PointCloud<PointXYZIRT>::Ptr surface_hull(new pcl::PointCloud<PointXYZIRT>);
+    hull.reconstruct(*surface_hull, polygons);
+
+    pcl::PointCloud<PointXYZIRT>::Ptr objects(new pcl::PointCloud<PointXYZIRT>);
+    pcl::CropHull<PointXYZIRT> bb_filter;
+    bb_filter.setDim(2);
+    bb_filter.setInputCloud(laserCloudInTemp);
+    bb_filter.setHullIndices(polygons);
+    bb_filter.setHullCloud(surface_hull);
+    bb_filter.setCropOutside(false);
+    bb_filter.filter(*objects);
+    point_cloud = *objects;
     pcl::transformPointCloud(point_cloud, point_cloud, transform.inverse());
 }
 
