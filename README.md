@@ -1,5 +1,5 @@
 # CVR-LSE: Compact Vectorization Representation of Local Static Environments for Unmanned Ground Vehicles
-Motivated by the requirement of robust and compact local environment perception, This repository contains code for a novel and compact vectorization representation approach of local static environments for unmanned ground vehicles, called **CVR-LSE**.
+Motivated by the requirement of robust and compact local environment perception, this repository contains code for a novel and compact vectorization representation approach of local static environments for unmanned ground vehicles, called **CVR-LSE**.
 
 ![Experimental_setup](./pic/experiment_setup.png)
 
