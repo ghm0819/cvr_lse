@@ -49,17 +49,17 @@ struct CvrLseParameters {
 	double max_odd_threshold;
 	double min_odd_threshold;
 	double max_distance;
-	std::vector<double> extrinsic_rot{4, 0.0};
-	std::vector<double> extrinsic_trans{3, 0.0};
+	std::vector<double> extrinsic_rot(4, 0.0);
+	std::vector<double> extrinsic_trans(3, 0.0);
 
-    std::vector<double> extrinsic_rot_left{4, 0.0};
-    std::vector<double> extrinsic_trans_left{3, 0.0};
+    	std::vector<double> extrinsic_rot_left(4, 0.0);
+    	std::vector<double> extrinsic_trans_left(3, 0.0);
 
-    std::vector<double> extrinsic_rot_right{4, 0.0};
-    std::vector<double> extrinsic_trans_right{3, 0.0};
+    	std::vector<double> extrinsic_rot_right(4, 0.0);
+    	std::vector<double> extrinsic_trans_right(3, 0.0);
 
-    std::vector<double> extrinsic_rot_rear{4, 0.0};
-    std::vector<double> extrinsic_trans_rear{3, 0.0};
+   	std::vector<double> extrinsic_rot_rear(4, 0.0);
+    	std::vector<double> extrinsic_trans_rear(3, 0.0);
 };
 
 enum GridStatus {
