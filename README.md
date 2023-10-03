@@ -1,5 +1,11 @@
-# CVR-LSE: Compact Vectorization Representation of Local Static Environments for Unmanned Ground Vehicles
-Motivated by the requirement of robust and compact local environment perception, this repository contains code for a novel and compact vectorization representation approach of local static environments for unmanned ground vehicles, called **CVR-LSE**.
+# CVR-LSE: Compact Vectorized Representation of Local Static Environments for Reliable Obstacle Detection
+Motivated by the requirement of robust and compact local environment perception, this repository contains code for a novel and compact vectorized representation approach of local static environments for unmanned ground vehicles, called **CVR-LSE**.
+
+## News!
+
+**[2023-9]** **CVR-LSE** is accepted by IEEE Transactions on Industrial Electronics (TIE)! 
+
+
 
 ![Experimental_setup](./pic/experiment_setup.png)
 
@@ -9,7 +15,7 @@ To run this project in minutes, check  [Dependency](#0-Dependency) and [Quick St
 
 Please cite the following paper if you use this project in your research: 
 
-> H. Gao, Q. Qiu, W Hua, X. Zhang, Z Han, and S. Zhang, "CVR-LSE: Compact Vectorization Representation of Local Static Environments for Unmanned Ground Vehicles," [arXiv:2206.06635](https://arxiv.org/abs/2206.06635).
+> H. Gao, Q. Qiu, W Hua, X. Zhang, Z Su, and S. Zhang, "CVR-LSE: Compact Vectorized  Representation of Local Static Environments for Reliable Obstacle Detection," EEE Transactions on Industrial Electronics, 2023, [ DOl: 10.1109/TIE.2023.3322016](https://arxiv.org/abs/2206.06635).
 
 ## Table of Contents
 
